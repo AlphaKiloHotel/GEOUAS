@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <!-- Make sure you put this AFTER Leaflet's CSS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+</head>
+
+<body>
+    <button onclick="getLocation()">Focus on your location</button>
+    <button onclick="toggleCondZone()">Toggle Conditional Zones</button>
+    <button onclick="toggleTempZone()">Toggle Temporary Zones</button>
+    <div id="map" style="height: 1000px;"></div>
+</body>
+<script>
+    function loadData() {
+        return fetch('UASZones_2026-02-19_202602031452.json')
+            .then(res => res.json());
+    }
+
+    function loadAerodromes() {
+        return fetch('basulm.csv')
+            .then(res => res.arrayBuffer())
+            .then(buffer => {
+                const decoder = new TextDecoder('ISO-8859-1');
+                const text = decoder.decode(buffer);
+                const parsed = Papa.parse(text, { 
+                    header: true,
+                    delimiter: ';'
+                });
+                
+                return parsed.data
+                    .filter(row => row.Latitude && row.Longitude) // Filtrer les lignes vides
+                    .map(row => {
+                        const lat = convertDMSToDecimal(row['Latitude']);
+                        const lon = convertDMSToDecimal(row['Longitude']);
+                        
+                        // Extraire la première orientation (avant le tiret)
+                        const orientation1 = row['Orientation première piste'] ? 
+                            parseFloat(row['Orientation première piste'].split('-')[0].replace(/['"]/g, ''))*10 : null;
+                        const orientation2 = row['Orientation deuxième piste'] ? 
+                            parseFloat(row['Orientation deuxième piste'].split('-')[0].replace(/['"]/g, ''))*10 : null;
+                        
+                        return {
+                            nom: row['Toponyme'],
+                            latitude: lat,
+                            longitude: lon,
+                            orientationPiste1: orientation1,
+                            longueurPiste1: parseFloat(row['Longueur première piste'].replace(/['"]/g, '')),
+                            orientationPiste2: orientation2,
+                            longueurPiste2: parseFloat(row['Longueur deuxième piste'].replace(/['"]/g, '')),
+                            raw: row
+                        };
+                    });
+            });
+    }
+
+    function convertDMSToDecimal(dmsString) {
+        // Convertit "S 21 05 50" ou "E 055 14 57" en nombre décimal
+        const parts = dmsString.trim().split(/\s+/);
+        const direction = parts[0];
+        const degrees = parseFloat(parts[1]);
+        const minutes = parseFloat(parts[2]);
+        const seconds = parseFloat(parts[3]);
+        
+        let decimal = degrees + minutes / 60 + seconds / 3600;
+        
+        if (direction === 'S' || direction === 'W') {
+            decimal = -decimal;
+        }
+        
+        return decimal;
+    }
+
+    function loadAndDrawAerodromes() {
+        loadAerodromes().then(aerodromes => {
+            aerodromes.forEach(aerodrome => {
+                const center = [aerodrome.latitude, aerodrome.longitude];
+                
+                // Dessiner la première piste
+                if (aerodrome.orientationPiste1 && aerodrome.longueurPiste1) {
+                    const orientation1 = parseFloat(aerodrome.orientationPiste1);
+                    const longueur1 = parseFloat(aerodrome.longueurPiste1);
+                    drawULMZones(center, orientation1, longueur1, "Plate-forme ULM - " + aerodrome.nom);
+                }
+                
+                // Dessiner la deuxième piste si elle existe
+                if (aerodrome.orientationPiste2 && aerodrome.longueurPiste2) {
+                    const orientation2 = parseFloat(aerodrome.orientationPiste2);
+                    const longueur2 = parseFloat(aerodrome.longueurPiste2);
+                    drawULMZones(center, orientation2, longueur2, "Plate-forme ULM - " + aerodrome.nom);
+                }
+            });
+        });
+    }
+
+    function getLocation() {
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(locSuccess, locError);
+        }
+    }
+
+    function locSuccess(position) {
+        L.marker([position.coords.latitude, position.coords.longitude]).addTo(map);
+        map.setView([position.coords.latitude, position.coords.longitude], 10);
+    }
+
+    function toggleZones(zones, visibilityFlag) {
+        zones.forEach(zone => {
+            if (visibilityFlag) {
+                zone.remove();
+            } else {
+                zone.addTo(map);
+            }
+        });
+        return !visibilityFlag;
+    }
+
+    function toggleCondZone() {
+        condZoneVisible = toggleZones(condZone, condZoneVisible);
+    }
+
+    function toggleTempZone() {
+        tempZoneVisible = toggleZones(tempZone, tempZoneVisible);
+    }
+
+    function locError() {
+        return;
+    }
+
+    // Calcule le point de destination à partir d'un point de départ, d'un angle (azimut) et d'une distance
+    function getDestination(startPos, bearingInDegrees, distanceInMeters) {
+        const earthRadiusKm = 6371;
+        const lat1 = startPos[0] * Math.PI / 180;
+        const lon1 = startPos[1] * Math.PI / 180;
+        const bearing = bearingInDegrees * Math.PI / 180;
+        const distance = distanceInMeters / 1000; // Convertir en km
+
+        const lat2 = Math.asin(
+            Math.sin(lat1) * Math.cos(distance / earthRadiusKm) +
+            Math.cos(lat1) * Math.sin(distance / earthRadiusKm) * Math.cos(bearing)
+        );
+
+        const lon2 = lon1 + Math.atan2(
+            Math.sin(bearing) * Math.sin(distance / earthRadiusKm) * Math.cos(lat1),
+            Math.cos(distance / earthRadiusKm) - Math.sin(lat1) * Math.sin(lat2)
+        );
+
+        return [lat2 * 180 / Math.PI, lon2 * 180 / Math.PI];
+    }
+
+    function drawULMZones(runwayCenter, bearingInDegrees, runwayLength, popupMessage) {
+        drawULMZone(runwayCenter, bearingInDegrees, runwayLength, 2500, 'BurlyWood', popupMessage + '<br><br>' + 'Plafond: 100m');
+        drawULMZone(runwayCenter, bearingInDegrees, runwayLength, 1500, 'Magenta', popupMessage + '<br><br>' + 'Plafond: 30m');
+        drawULMZone(runwayCenter, bearingInDegrees, runwayLength, 500, 'red', popupMessage + '<br><br>' + 'VOL INTERDIT');
+    }
+
+    function drawULMZone(startPos, bearingInDegrees, runwayLength, width, color, popupMessage) {
+        const runway2andHalf = getDestination(startPos, bearingInDegrees, 2500 + runwayLength / 2);
+        const firstPoint = getDestination(runway2andHalf, bearingInDegrees + 90, width);
+        const secondPoint = getDestination(firstPoint, bearingInDegrees + 180, 5000 + runwayLength);
+        const thirdPoint = getDestination(secondPoint, bearingInDegrees + 270, width * 2);
+        const fourthPoint = getDestination(thirdPoint, bearingInDegrees, 5000 + runwayLength);
+        const poly = L.polygon([firstPoint, secondPoint, thirdPoint, fourthPoint], {
+            color: color,
+            fillOpacity: 0.5
+        }).addTo(map);
+        
+        if (popupMessage) {
+            poly.bindPopup(popupMessage);
+        }
+    }
+
+
+    // Configuration initiale
+    const map = L.map('map').setView([46.769459, 2.432067], 6);
+    const condZone = [];
+    const tempZone = [];
+    let condZoneVisible = true;
+    let tempZoneVisible = true;
+    processData();
+    loadAndDrawAerodromes();
+
+    function processData(data) {
+        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+        }).addTo(map);
+
+        loadData().then(data => {
+            let message = '';
+            const zonesToDisplay = [];
+            data.features.forEach(feature => {
+                let zoneIndex = 0;
+                let lastZoneCeiling = 0;
+                let zoneAltitude = 0;
+                let zoneMaxAltitude = 0;
+
+                feature.geometry.forEach(zone => {
+                    message = feature.name + '<br><br>' + feature.otherReasonInfo + '<br><br>' + feature.message
+                    feature.restrictionConditions?.forEach(condition => {
+                        message += '<br><br>' + condition;
+                    });
+
+                    if (feature.applicability?.[0]?.permanent === 'NO') {
+                        message += '<br><br>' + 'NON PERMANENT';
+                    }
+
+                    if (
+                        (zone.lowerVerticalReference === 'AGL' && zone.lowerLimit < 120) ||
+                        (zoneIndex != 0 && zone.upperLimit == lastZoneCeiling && zone.lowerVerticalReference === 'AMSL')
+                    ) {
+
+                        if (zoneIndex == 0) {
+                            if (zone.lowerVerticalReference === 'AGL') {
+                                zoneMaxAltitude = zone.lowerLimit;
+                                if (zone.upperVerticalReference === 'AMSL') {
+                                    zoneAltitude = zone.upperLimit - 120;
+                                }
+                            }
+
+
+                        } else if (zoneIndex != 0) {
+                            if (zone.lowerVerticalReference === 'AGL') zoneMaxAltitude = zone.lowerLimit;
+                            else zoneMaxAltitude = Math.round(zone.lowerLimit - zoneAltitude);
+                        }
+
+                        let found = zonesToDisplay.findIndex((zoneByAlt) => zoneByAlt.maxAltitude === zoneMaxAltitude);
+                        if (found == -1) {
+                            found = zonesToDisplay.push({
+                                maxAltitude: zoneMaxAltitude,
+                                zones: []
+                            }) - 1;
+                        }
+
+                        message += '<br><br>' + 'Plafond :' + zoneMaxAltitude
+                        let zoneColor = 'red'; // default
+                        switch (zoneMaxAltitude) {
+                            case 0:
+                                if (feature.restriction === 'CONDITIONAL') {
+                                    zoneColor = 'green';
+                                } else {
+                                    zoneColor = 'red';
+                                }
+                                break;
+                            case 30:
+                                zoneColor = 'Magenta';
+                                break;
+                            case 50:
+                                zoneColor = 'orange';
+                                break;
+                            case 60:
+                                zoneColor = 'yellow';
+                                break;
+                            case 100:
+                                zoneColor = 'BurlyWood';
+                                break;
+                            default:
+                                zoneColor = 'red';
+                                break;
+                        }
+                        zoneIndex++;
+                        lastZoneCeiling = zone.upperLimit
+                        switch (zone.horizontalProjection.type ?? '') {
+                            case 'Circle':
+                                const circle = L.circle([zone.horizontalProjection.center[1], zone.horizontalProjection.center[0]], {
+                                    color: zoneColor,
+                                    fillOpacity: 0.5,
+                                    radius: zone.horizontalProjection.radius
+                                })
+                                zonesToDisplay[found].zones.push({
+                                    drawing: circle,
+                                    message: message,
+                                    color: zoneColor,
+                                    radius: zone.horizontalProjection.radius
+                                });
+                                if (feature.restriction === 'CONDITIONAL') {
+                                    condZone.push(circle);
+                                }
+                                if (feature.applicability?.[0]?.permanent === 'NO') {
+                                    tempZone.push(circle);
+                                }
+                                // .addTo(map).bindPopup(message);
+                                break;
+                            case 'Polygon':
+                                const polygonPoint = [];
+                                zone.horizontalProjection.coordinates[0].forEach(coord => {
+                                    polygonPoint.push([coord[1], coord[0]]);
+                                });
+                                const polygon = L.polygon(polygonPoint,
+                                    {
+                                        color: zoneColor,
+                                        fillOpacity: 0.5
+                                    }
+                                );
+                                zonesToDisplay[found].zones.push(
+                                    {
+                                        drawing: polygon,
+                                        message: message,
+                                        color: zoneColor,
+                                    }
+                                );
+                                if (feature.restriction === 'CONDITIONAL') {
+                                    condZone.push(polygon);
+                                }
+                                if (feature.applicability?.[0]?.permanent === 'NO') {
+                                    tempZone.push(polygon);
+                                }
+                                break;
+                            default:
+                                console.log('Unknown geometry type:', zone.horizontalProjection);
+                                break;
+                        }
+                    }
+                });
+            });
+            zonesToDisplay.sort((a, b) => b.maxAltitude - a.maxAltitude);
+            zonesToDisplay.forEach(zoneGroupedByAlt => {
+                zoneGroupedByAlt.zones.forEach(zoneReady => {
+                    zoneReady.drawing.addTo(map).bindPopup(zoneReady.message);
+                    zoneReady.drawing.setStyle({
+                        color: zoneReady.color,
+                        fillOpacity: 0.5,
+                        radius: zoneReady.radius
+                    })
+                })
+            });
+        });
+    }
+</script>
+
+</html>
