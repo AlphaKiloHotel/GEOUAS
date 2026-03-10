@@ -11,13 +11,38 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
     <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .button-container {
+            display: flex;
+            justify-content: start;
+            gap: 10px;
+            padding: 5px;
+            flex-wrap: wrap;
+        }
+        #map {
+            flex: 1;
+        }
+    </style>
 </head>
 
 <body>
-    <button onclick="getLocation()">Focus on your location</button>
-    <button onclick="toggleCondZone()">Toggle Conditional Zones</button>
-    <button onclick="toggleTempZone()">Toggle Temporary Zones</button>
-    <div id="map" style="height: 1000px;"></div>
+    <div class="button-container">
+        <button onclick="getLocation()">Focus on your location</button>
+        <button onclick="toggleCondZone()">Toggle Conditional Zones</button>
+        <button onclick="toggleTempZone()">Toggle Temporary Zones</button>
+    </div>
+    <div id="map"></div>
 </body>
 <script>
     function loadData() {
