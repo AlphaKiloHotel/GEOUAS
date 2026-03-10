@@ -195,7 +195,7 @@
         const fourthPoint = getDestination(thirdPoint, bearingInDegrees, 5000 + runwayLength);
         const poly = L.polygon([firstPoint, secondPoint, thirdPoint, fourthPoint], {
             color: color,
-            fillOpacity: 0.5
+            fillOpacity: 0.25
         }).addTo(map);
         
         if (popupMessage) {
@@ -297,7 +297,7 @@
                             case 'Circle':
                                 const circle = L.circle([zone.horizontalProjection.center[1], zone.horizontalProjection.center[0]], {
                                     color: zoneColor,
-                                    fillOpacity: 0.5,
+                                    fillOpacity: 0.25,
                                     radius: zone.horizontalProjection.radius
                                 })
                                 zonesToDisplay[found].zones.push({
@@ -322,7 +322,7 @@
                                 const polygon = L.polygon(polygonPoint,
                                     {
                                         color: zoneColor,
-                                        fillOpacity: 0.5
+                                        fillOpacity: 0.25
                                     }
                                 );
                                 zonesToDisplay[found].zones.push(
@@ -352,7 +352,7 @@
                     zoneReady.drawing.addTo(map).bindPopup(zoneReady.message);
                     zoneReady.drawing.setStyle({
                         color: zoneReady.color,
-                        fillOpacity: 0.5,
+                        fillOpacity: 0.25,
                         radius: zoneReady.radius
                     })
                 })
